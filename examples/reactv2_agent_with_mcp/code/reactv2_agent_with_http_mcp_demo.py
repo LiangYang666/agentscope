@@ -24,7 +24,7 @@ agentscope.init(
             "model_name": "qwen-plus",
             # When using ReActAgentV2, streaming (i.e., setting "stream": True)
             # is not supported.
-            # "stream": False,
+            "stream": True,
         },
         # Or you can use an OpenAI-compatible API, but note that non-OpenAI
         # models need to be added to OpenAIFormatter later.
@@ -37,6 +37,7 @@ agentscope.init(
             "api_key": os.environ.get("DASHSCOPE_API_KEY"),
             "model_type": "openai_chat",
             "model_name": model_name,
+            "stream": True,
         },
     ],
 )
