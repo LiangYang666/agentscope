@@ -26,6 +26,30 @@ def _verify_text_content_in_openai_delta_response(response: dict) -> bool:
     return True
 
 
+def _verify_tool_calls_in_openai_delta_response(response: dict) -> bool:
+    """Verify if the tool calls exist in the openai streaming response
+
+    Args:
+        response (`dict`):
+            The JSON-format OpenAI response (After calling `model_dump`
+             function)
+
+    Returns:
+        `bool`: If the tool calls exist
+    """
+
+    if len(response.get("choices", [])) == 0:
+        return False
+
+    if response["choices"][0].get("delta", None) is None:
+        return False
+
+    if response["choices"][0]["delta"].get("tool_calls", None) is None:
+        return False
+
+    return True
+
+
 def _verify_text_content_in_openai_message_response(
     response: dict,
     allow_content_none: bool = False,
