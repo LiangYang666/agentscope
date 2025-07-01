@@ -15,9 +15,10 @@ from loguru import logger
 from ._model_usage import ChatUsage
 from ._model_utils import (
     _verify_text_content_in_openai_delta_response,
-    _verify_text_content_in_openai_message_response,
+    _verify_text_content_in_openai_message_response, _verify_tool_calls_in_openai_delta_response,
 )
 from .model import ModelWrapperBase, ModelResponse
+from .response import StreamChunk, ToolCallChunk, FunctonChunk
 from ..formatters import OpenAIFormatter, CommonFormatter
 from ..manager import FileManager
 from ..message import Msg, ToolUseBlock
@@ -269,14 +270,36 @@ class OpenAIChatWrapper(OpenAIWrapperBase):
 
         if stream:
 
-            def generator() -> Generator[str, None, None]:
-                text = ""
+            def generator() -> Generator[StreamChunk, None, None]:
+                # text = ""
+                stream_chunk = StreamChunk()
                 last_chunk = {}
                 for chunk in response:
                     chunk = chunk.model_dump()
+                    updated = False
                     if _verify_text_content_in_openai_delta_response(chunk):
-                        text += chunk["choices"][0]["delta"]["content"]
-                        yield text
+                        stream_chunk.text += chunk["choices"][0]["delta"]["content"]
+                        updated = True
+                    if _verify_tool_calls_in_openai_delta_response(chunk):
+                        updated = True
+                        tool_calls = chunk["choices"][0]["delta"].get("tool_calls")
+                        for tool_call in tool_calls:
+                            index = tool_call["index"]
+                            if stream_chunk.tool_calls is None:
+                                stream_chunk.tool_calls = []
+                            if len(stream_chunk.tool_calls) <= index:
+                                stream_chunk.tool_calls.append(
+                                    ToolCallChunk(index=index, type=tool_call.get("type")))
+                            tool_call_chunk = stream_chunk.tool_calls[index]
+                            tool_call_chunk.id += tool_call.get("id") or ""
+                            if tool_call["type"] == "function" and "function" in tool_call:
+                                if tool_call_chunk.function is None:
+                                    tool_call_chunk.function = FunctonChunk()
+                                function_chunk = tool_call_chunk.function
+                                function_chunk.name += tool_call["function"].get("name") or ""
+                                function_chunk.arguments += tool_call["function"].get("arguments") or ""
+                    if updated:
+                        yield stream_chunk
                     last_chunk = chunk
 
                 # Update the last chunk to save locally
@@ -285,7 +308,7 @@ class OpenAIChatWrapper(OpenAIWrapperBase):
 
                 last_chunk["choices"][0]["message"] = {
                     "role": "assistant",
-                    "content": text,
+                    "content": stream_chunk.text,
                 }
 
                 self._save_model_invocation_and_update_monitor(
