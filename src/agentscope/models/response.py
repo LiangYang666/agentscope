@@ -3,8 +3,29 @@
 import json
 from typing import Optional, Sequence, Any, Generator, Union, Tuple
 
+from pydantic.dataclasses import dataclass
+
 from ..message import ToolUseBlock
 from ..utils.common import _is_json_serializable
+
+@dataclass
+class FunctonChunk:
+    name: str = ""
+    arguments: str = ""
+
+
+@dataclass
+class ToolCallChunk:
+    index: int
+    id: str = ""
+    type: str = ""
+    function: FunctonChunk | None = None
+
+
+@dataclass
+class StreamChunk:
+    text: str = ""
+    tool_calls: list[ToolCallChunk] | None = None
 
 
 class ModelResponse:
@@ -21,7 +42,7 @@ class ModelResponse:
         image_urls: Optional[Sequence[str]] = None,
         raw: Any = None,
         parsed: Optional[Any] = None,
-        stream: Optional[Generator[str, None, None]] = None,
+        stream: Optional[Generator[str | StreamChunk, None, None]] = None,
         tool_calls: Optional[list[ToolUseBlock]] = None,
     ) -> None:
         """Initialize the model response.
@@ -49,6 +70,9 @@ class ModelResponse:
         self.parsed = parsed
         self._stream = stream
         self.tool_calls = tool_calls
+        if stream and not tool_calls:
+            self.tool_calls = []
+        self.tool_call_chunk_list = None
         self._is_stream_exhausted = False
 
     @property
@@ -95,13 +119,37 @@ class ModelResponse:
             return
 
         try:
-            last_text = next(self._stream)
+            last_item = next(self._stream)
+            if hasattr(last_item, "tool_calls"):
+                self.tool_call_chunk_list = last_item.tool_calls
+            if hasattr(last_item, "text"):
+                last_text = last_item.text
+            else:
+                last_text = last_item
 
-            for text in self._stream:
+            for item in self._stream:
                 self._text = last_text
                 yield False, last_text
+                if hasattr(item, "tool_calls"):
+                    self.tool_call_chunk_list = item.tool_calls
+                if hasattr(item, "text"):
+                    text = item.text
+                else:
+                    text = item
                 last_text = text
             self._text = last_text
+            if self.tool_call_chunk_list:
+                self.tool_call_chunk_list: list[ToolCallChunk]
+                for tool_call_chunk in self.tool_call_chunk_list:
+                    self.tool_calls.append(
+                        ToolUseBlock(
+                            type="tool_use",
+                            id=tool_call_chunk.id,
+                            name=tool_call_chunk.function.name,
+                            input=json.loads(tool_call_chunk.function.arguments),
+                        ),
+                    )
+
             yield True, last_text
 
             return
