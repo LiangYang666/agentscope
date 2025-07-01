@@ -449,6 +449,16 @@ class AgentBase(metaclass=_AgentMeta):
                 )
                 log_stream_msg(new_input, last=last)
 
+            if tool_calls:
+                msg_to_speak = Msg(
+                    name=self.name,
+                    content=tool_calls,
+                    role="assistant",
+                )
+                msg_hook = _call_pre_speak_hooks(msg_to_speak, stream=False, last=True)
+                log_msg(msg_hook)
+
+
             # Call the object-level post speak hooks
             for _, hook in self._hooks_post_speak.items():
                 hook(self)
