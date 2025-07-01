@@ -8,6 +8,7 @@ from typing import Any, Union, List, Optional, Generator
 from loguru import logger
 
 from ._model_usage import ChatUsage
+from .response import StreamChunk, ToolCallChunk, FunctonChunk
 from ..formatters import DashScopeFormatter
 from ..manager import FileManager
 from ..message import Msg, ToolUseBlock
@@ -255,9 +256,9 @@ class DashScopeChatWrapper(DashScopeWrapperBase):
         # step3: invoke llm api, record the invocation and update the monitor
         if stream:
 
-            def generator() -> Generator[str, None, None]:
+            def generator() -> Generator[StreamChunk, None, None]:
                 last_chunk = None
-                text = ""
+                stream_chunk = StreamChunk()
                 for chunk in response:
                     if chunk.status_code != HTTPStatus.OK:
                         error_msg = (
@@ -267,13 +268,30 @@ class DashScopeChatWrapper(DashScopeWrapperBase):
                             f"Error message: {chunk.message}"
                         )
                         raise RuntimeError(error_msg)
+                    # print(chunk.output["choices"][0])
+                    stream_chunk.text += chunk.output["choices"][0]["message"]["content"]
+                    tool_calls = chunk.output["choices"][0]["message"].get("tool_calls")
+                    if tool_calls:
+                        for tool_call in tool_calls:
+                            index = tool_call["index"]
+                            if stream_chunk.tool_calls is None:
+                                stream_chunk.tool_calls = []
+                            if len(stream_chunk.tool_calls) <= index:
+                                stream_chunk.tool_calls.append(ToolCallChunk(index=index, type=tool_call.get("type")))
+                            tool_call_chunk = stream_chunk.tool_calls[index]
+                            tool_call_chunk.id += tool_call.get("id") or ""
+                            if tool_call["type"] == "function" and "function" in tool_call:
+                                if tool_call_chunk.function is None:
+                                    tool_call_chunk.function = FunctonChunk()
+                                function_chunk = tool_call_chunk.function
+                                function_chunk.name += tool_call["function"].get("name") or ""
+                                function_chunk.arguments += tool_call["function"].get("arguments") or ""
 
-                    text += chunk.output["choices"][0]["message"]["content"]
-                    yield text
+                    yield stream_chunk
                     last_chunk = chunk
 
                 # Replace the last chunk with the full text
-                last_chunk.output["choices"][0]["message"]["content"] = text
+                last_chunk.output["choices"][0]["message"]["content"] = stream_chunk.text
 
                 # Save the model invocation and update the monitor
                 self._save_model_invocation_and_update_monitor(
